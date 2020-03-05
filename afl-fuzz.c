@@ -132,7 +132,7 @@ EXP_ST u8  skip_deterministic,        /* Skip deterministic stages?       */
            run_over10m,               /* Run time over 10 minutes?        */
            persistent_mode,           /* Running in persistent mode?      */
            dsf_enabled,               /* Domain-specific fuzzing          */
-           save_everything,           /* save all inputs with something in perf_map */
+           save_everything,           /* save all inputs with something in perf_map */ //一个标记,与dsf搭配
            deferred_mode,             /* Deferred forkserver mode?        */
            fast_cal;                  /* Try to calibrate faster?         */
 
@@ -148,12 +148,12 @@ static s32 forksrv_pid,               /* PID of the fork server           */
 
 EXP_ST u8* trace_bits;                /* SHM with instrumentation bitmap  */
 
-EXP_ST u32* dsf_map;                  /* DSF - SHM with additional maps   */
-EXP_ST u32  dsf_cumulated[DSF_LEN];   /* DSF - keeps track of cumulated values  */
-EXP_ST u8   dsf_entry_changed[DSF_LEN]; /* DSF - keeps track of changes in a run  */
+EXP_ST u32* dsf_map;                  /* DSF - SHM with additional maps   */  //共享内存,记录数据
+EXP_ST u32  dsf_cumulated[DSF_LEN];   /* DSF - keeps track of cumulated values  */  //长度和dsf_config中的start end相关
+EXP_ST u8   dsf_entry_changed[DSF_LEN]; /* DSF - keeps track of changes in a run  */  //默认全是0,表示都没有变过,后面应该会被改0,表示什么作用?
 EXP_ST int  dsf_count = 0;            /* DSF - Number of registered domains */
 EXP_ST int  dsf_len_actual = 0;       /* Dynamic adjustment to DSF length */
-EXP_ST dsf_config dsf_configs[DSF_MAX]; /* DSF - config struct array */
+EXP_ST dsf_config dsf_configs[DSF_MAX]; /* DSF - config struct array */  //这里是什么
 
 typedef u32 (*reducer_t)(u32, u32);    /* Signature for reducer functions */
 extern reducer_t dsf_reducers[];       /* Array of predefined reducer functions */
@@ -1001,13 +1001,13 @@ int hibit(unsigned int n) {
     n |= (n >> 16);
     return n - (n >> 1);
 }
-
+//比较map是否被修改过?
 /* Whether the domain-specific fuzzing map had any changes. This function should return false if called more than once. */
 static inline u8 has_dsf_changed() {
   int ret = 0;
   for (int j = 0; j < dsf_count; j++) {
-    dsf_config* dsf = &dsf_configs[j];              // Config for this domain
-    reducer_t reduce = dsf_reducers[dsf->reducer];  // Reducer function for this domain
+    dsf_config* dsf = &dsf_configs[j];              // Config for this domain //这是个结构指针
+    reducer_t reduce = dsf_reducers[dsf->reducer];  // Reducer function for this domain //函数指针 reducer函数, 集合运算函数 
     for (int i = dsf->start; i < dsf->end; i++){
       u32 cur_val = dsf_map[i];
       u32 old_cumulated = dsf_cumulated[i];
@@ -1015,7 +1015,7 @@ static inline u8 has_dsf_changed() {
       if (unlikely(old_cumulated != new_cumulated)) {
         dsf_cumulated[i] = new_cumulated;
         ret = 1;
-        dsf_entry_changed[i] = 1;
+        dsf_entry_changed[i] = 1; //记录改变过的位置,这里是和跳转对应的,说明这个跳转相关的值前进过了
         DEBUG("DSF update at key=0x%06x, val=%u (0x%08x); new aggregate: %u (0x%08x); earlier was: %u (0x%08x)\n", i, cur_val, cur_val, new_cumulated, new_cumulated, old_cumulated, old_cumulated);
       }
     }
@@ -1318,13 +1318,14 @@ static void update_bitmap_score(struct queue_entry* q) {
   u32 i;
 
   if (dsf_enabled){
+    //top rate只记录每个使得每个跳转边值最大的那个测试用例
     for (int j = 0; j < dsf_count; j++) {
       dsf_config* dsf = &dsf_configs[j];
       for (i = dsf->start; i < dsf->end; i++) {
         /* Did the entry in the DSF map change this run? */
-        if (dsf_entry_changed[i]) {
+        if (dsf_entry_changed[i]) {//当前测试用例使得某个跳转边的值发生了改变
           /* Insert ourselves as the new winner. */
-          top_rated[i] = q;
+          top_rated[i] = q; //dsf中的i也是表示第几个跳转边
           score_changed = 1;
           DEBUG("This input is the new top rated entry for key 0x%06x\n", i);
           dsf_entry_changed[i] = 0;
@@ -1504,7 +1505,7 @@ EXP_ST void setup_shm(void) {
 
   trace_bits = shmat(shm_id, NULL, 0);
   // setup dsf map if needed
-  if (dsf_enabled || save_everything) dsf_map = (u32 *) (trace_bits + MAP_SIZE);
+  if (dsf_enabled || save_everything) dsf_map = (u32 *) (trace_bits + MAP_SIZE); //什么时候绑定共享内存? 按需绑定?
   
   if (!trace_bits) PFATAL("shmat() failed");
 
@@ -2263,7 +2264,7 @@ EXP_ST void init_forkserver(char** argv) {
 
   setitimer(ITIMER_REAL, &it, NULL);
 
-  rlen = read(fsrv_st_fd, &status, 4);
+  rlen = read(fsrv_st_fd, &status, 4); //这个status的传递需要研究一下
 
   it.it_value.tv_sec = 0;
   it.it_value.tv_usec = 0;
@@ -2275,10 +2276,10 @@ EXP_ST void init_forkserver(char** argv) {
 
   if (rlen == 4) {
     OKF("All right - fork server is up.");
-
+    //这里是dsf添加的
     if (dsf_enabled || save_everything) {
       /* If doing domain-specific fuzzing, this value is actually meaningful. */
-      dsf_count = status;
+      dsf_count = status;  //这里收到信息,表示用了几个dsf,表示启用了几个dsfmap
 
       if (dsf_count < 0 || dsf_count > DSF_MAX) FATAL("%d is too many DSF maps! Max is %d", dsf_count, DSF_MAX);
       
@@ -2289,7 +2290,7 @@ EXP_ST void init_forkserver(char** argv) {
 
       SAYF("Receiving %d domain-specific front-ends..\n", dsf_count);
         
-      rlen = read(fsrv_st_fd, dsf_configs, dsf_count * sizeof(dsf_config));
+      rlen = read(fsrv_st_fd, dsf_configs, dsf_count * sizeof(dsf_config)); //接收dsf_configs信息,表示每个dsf map的设置信息
       if (rlen != dsf_count * sizeof(dsf_config)) FATAL("Could not read DSF configs");
       OKF("%d domain-specific front-end configs received", dsf_count);
 
@@ -2299,7 +2300,7 @@ EXP_ST void init_forkserver(char** argv) {
         int reducer = dsf_configs[j].reducer;
         int initial = dsf_configs[j].initial;
         SAYF("DSF %d: Start=0x%06x, End=0x%06x, Size=%d, Reducer[%d]=%s, Initial=%d\n", j, start, end, end-start, reducer, dsf_reducer_names[reducer], initial);
-        dsf_len_actual = end;
+        dsf_len_actual = end;//第一次赋值是在这里
       }
       SAYF("Total DSF map length = %d\n", dsf_len_actual);
     }
@@ -2801,7 +2802,7 @@ static u8 calibrate_case(char** argv, struct queue_entry* q, u8* use_mem,
         /* setup the dsf cksum here. Assume it is not variable, or that 
           variability will be detected in the regular checking */ 
         if (dsf_enabled) 
-          q->dsf_cksum = hash32(dsf_map, dsf_len_actual*sizeof(u32), HASH_CONST); 
+          q->dsf_cksum = hash32(dsf_map, dsf_len_actual*sizeof(u32), HASH_CONST); //这里仅仅是记录,没有重要逻辑
         memcpy(first_trace, trace_bits, MAP_SIZE);
 
       }
@@ -3872,17 +3873,17 @@ static void maybe_delete_out_dir(void) {
 
 #ifndef __sun
 
-  if (flock(out_dir_fd, LOCK_EX | LOCK_NB) && errno == EWOULDBLOCK) {
-
-    SAYF("\n" cLRD "[-] " cRST
-         "Looks like the job output directory is being actively used by another\n"
-         "    instance of afl-fuzz. You will need to choose a different %s\n"
-         "    or stop the other process first.\n",
-         sync_id ? "fuzzer ID" : "output location");
-
-    FATAL("Directory '%s' is in use", out_dir);
-
-  }
+//  if (flock(out_dir_fd, LOCK_EX | LOCK_NB) && errno == EWOULDBLOCK) {
+//
+//    SAYF("\n" cLRD "[-] " cRST
+//         "Looks like the job output directory is being actively used by another\n"
+//         "    instance of afl-fuzz. You will need to choose a different %s\n"
+//         "    or stop the other process first.\n",
+//         sync_id ? "fuzzer ID" : "output location");
+//
+//    FATAL("Directory '%s' is in use", out_dir);
+//
+//  }
 
 #endif /* !__sun */
 
@@ -4222,14 +4223,14 @@ static void show_stats(void) {
 
   SAYF(TERM_HOME);
 
-  if (term_too_small) {
+  //if (term_too_small) {
 
-    SAYF(cBRI "Your terminal is too small to display the UI.\n"
-         "Please resize terminal window to at least 80x25.\n" cRST);
+  //  SAYF(cBRI "Your terminal is too small to display the UI.\n"
+  //       "Please resize terminal window to at least 80x25.\n" cRST);
 
-    return;
+  //  return;
 
-  }
+  //}
 
   /* Let's start by drawing a centered banner. */
 
@@ -8302,8 +8303,8 @@ int main(int argc, char** argv) {
   /* Woop woop woop */
 
   if (!not_on_tty) {
-    sleep(4);
-    start_time += 4000;
+    sleep(0.01);
+    start_time += 100;
     if (stop_soon) goto stop_fuzzing;
   }
 

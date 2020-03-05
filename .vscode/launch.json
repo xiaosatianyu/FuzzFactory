@@ -9,7 +9,7 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "/home/xiaosa/FuzzFactory/afl-fuzz",
-            "args": ["-p", "-i", "/home/xiaosa/FuzzFactory/demo/seeds", "-o", "/home/xiaosa/FuzzFactory/demo/results /home/xiaosa/FuzzFactory/demo/demo"],
+            "args": ["-p", "-i", "/home/xiaosa/FuzzFactory/demo/seeds", "-o", "/home/xiaosa/FuzzFactory/demo/results", "/home/xiaosa/FuzzFactory/demo/demo"],
             "stopAtEntry": true,
             "cwd": "${workspaceFolder}",
             "environment": [],
